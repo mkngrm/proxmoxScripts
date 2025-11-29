@@ -2,6 +2,14 @@
 
 A collection of automation scripts for managing Proxmox VE environments. These scripts help expedite and automate common manual processes when working with Proxmox containers and virtual machines.
 
+## Quick Start
+
+Install with one command on your Proxmox host:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mkngrm/proxmoxScripts/main/install.sh | sh
+```
+
 ## Overview
 
 This repository contains scripts designed to streamline Proxmox administration tasks, including user management, container configuration, and system automation.
@@ -393,13 +401,45 @@ Security audit across multiple containers.
 
 ## Installation
 
-Clone this repository on your Proxmox host:
+### Quick Install (Recommended)
+
+Install all scripts with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mkngrm/proxmoxScripts/main/install.sh | sh
+```
+
+Or using wget:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/mkngrm/proxmoxScripts/main/install.sh | sh
+```
+
+This will:
+- Download all scripts to `/opt/proxmoxScripts`
+- Make them executable
+- Create command symlinks in `/usr/local/bin` (e.g., `localUserSetupLXC`)
+- Download documentation
+
+**Note:** The installer requires root privileges and will prompt if not run with sudo.
+
+### Manual Installation
+
+Alternatively, clone the repository:
 
 ```bash
 cd /root
 git clone https://github.com/mkngrm/proxmoxScripts.git
 cd proxmoxScripts
 chmod +x *.sh
+```
+
+### Updating
+
+To update to the latest version, simply run the installer again:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mkngrm/proxmoxScripts/main/install.sh | sh
 ```
 
 ## Contributing
