@@ -359,19 +359,19 @@ for lxc_id in "${LXC_IDS[@]}"; do
             if [ -n "${CONTAINER_IPS[$lxc_id]:-}" ]; then
                 echo "    ssh $USERNAME@${CONTAINER_IPS[$lxc_id]}"
             fi
-            ((success_count++))
+            success_count=$((success_count + 1))
             ;;
         SKIPPED*)
             echo -e "  ${YELLOW}⊘${NC} LXC $lxc_id: $result"
-            ((skipped_count++))
+            skipped_count=$((skipped_count + 1))
             ;;
         FAILED*)
             echo -e "  ${RED}✗${NC} LXC $lxc_id: $result"
-            ((failed_count++))
+            failed_count=$((failed_count + 1))
             ;;
         *)
             echo -e "  ${YELLOW}?${NC} LXC $lxc_id: $result"
-            ((failed_count++))
+            failed_count=$((failed_count + 1))
             ;;
     esac
 done

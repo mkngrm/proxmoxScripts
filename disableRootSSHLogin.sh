@@ -15,6 +15,7 @@ NC='\033[0m' # No Color
 # Default values
 LXC_IDS=()
 ACTION="disable"  # disable or enable
+STRICT_MODE=false  # Use 'no' instead of 'prohibit-password'
 
 # Arrays to track results
 declare -A CONTAINER_RESULTS
@@ -29,17 +30,23 @@ Required arguments:
   -c LXC_ID [LXC_ID...]  One or more LXC container IDs (space-separated)
 
 Optional arguments:
-  -e                     Enable root SSH login (default is to disable)
+  -e                     Enable root SSH login (sets PermitRootLogin yes)
+  -s                     Strict mode: completely disable root login (uses 'no' instead of 'prohibit-password')
   -h                     Show this help message
 
-Examples:
-  # Disable root SSH login in a single container
-  $0 -c 100
+Default behavior:
+  Without -e flag: Sets PermitRootLogin to 'prohibit-password' (key-based auth only)
+  With -s flag: Sets PermitRootLogin to 'no' (completely blocks root login)
+  With -e flag: Sets PermitRootLogin to 'yes' (allows root login)
 
-  # Disable root SSH login in multiple containers
+Examples:
+  # Disable password auth for root (allows keys only) - RECOMMENDED
   $0 -c 100 101 102
 
-  # Enable root SSH login in multiple containers
+  # Completely disable root SSH login (strict mode)
+  $0 -c 100 101 102 -s
+
+  # Enable root SSH login
   $0 -c 100 101 102 -e
 
 EOF
@@ -81,6 +88,7 @@ validate_lxc_running() {
 configure_root_ssh() {
     local lxc_id=$1
     local action=$2
+    local strict_mode=$3
     local ssh_config="/etc/ssh/sshd_config"
     local backup_suffix=".backup-$(date +%Y%m%d-%H%M%S)"
 
@@ -122,12 +130,14 @@ configure_root_ssh() {
     CONTAINER_PREVIOUS_STATE[$lxc_id]=$current_setting
     log_container "$lxc_id" "Current setting: PermitRootLogin $current_setting"
 
-    # Determine what to do based on action
+    # Determine desired value based on action and strict mode
     local desired_value
-    if [ "$action" = "disable" ]; then
+    if [ "$action" = "enable" ]; then
+        desired_value="yes"
+    elif [ "$strict_mode" = true ]; then
         desired_value="no"
     else
-        desired_value="yes"
+        desired_value="prohibit-password"
     fi
 
     # Check if change is needed
@@ -204,6 +214,10 @@ while [[ $# -gt 0 ]]; do
             ACTION="enable"
             shift
             ;;
+        -s)
+            STRICT_MODE=true
+            shift
+            ;;
         -h)
             usage
             ;;
@@ -222,12 +236,18 @@ fi
 
 # Display summary of what will be done
 echo
-log_info "Root SSH login will be ${ACTION}d in ${#LXC_IDS[@]} container(s): ${LXC_IDS[*]}"
+if [ "$ACTION" = "enable" ]; then
+    log_info "Root SSH login will be enabled (PermitRootLogin yes) in ${#LXC_IDS[@]} container(s): ${LXC_IDS[*]}"
+elif [ "$STRICT_MODE" = true ]; then
+    log_info "Root SSH login will be completely disabled (PermitRootLogin no) in ${#LXC_IDS[@]} container(s): ${LXC_IDS[*]}"
+else
+    log_info "Root password login will be disabled (PermitRootLogin prohibit-password) in ${#LXC_IDS[@]} container(s): ${LXC_IDS[*]}"
+fi
 echo
 
 # Process each container
 for lxc_id in "${LXC_IDS[@]}"; do
-    configure_root_ssh "$lxc_id" "$ACTION"
+    configure_root_ssh "$lxc_id" "$ACTION" "$STRICT_MODE"
     echo
 done
 
@@ -249,19 +269,19 @@ for lxc_id in "${LXC_IDS[@]}"; do
     case $result in
         SUCCESS)
             echo -e "  ${GREEN}✓${NC} LXC $lxc_id: Success (was: $previous)"
-            ((success_count++))
+            success_count=$((success_count + 1))
             ;;
         SKIPPED*)
             echo -e "  ${YELLOW}⊘${NC} LXC $lxc_id: $result"
-            ((skipped_count++))
+            skipped_count=$((skipped_count + 1))
             ;;
         FAILED*)
             echo -e "  ${RED}✗${NC} LXC $lxc_id: $result"
-            ((failed_count++))
+            failed_count=$((failed_count + 1))
             ;;
         *)
             echo -e "  ${YELLOW}?${NC} LXC $lxc_id: $result"
-            ((failed_count++))
+            failed_count=$((failed_count + 1))
             ;;
     esac
 done

@@ -96,15 +96,16 @@ For each specified container, the script:
 
 ### disableRootSSHLogin.sh
 
-Enable or disable root SSH login across one or more LXC containers by modifying the SSH daemon configuration.
+Configure root SSH login security across one or more LXC containers by modifying the SSH daemon configuration.
 
 #### Features
 
 - **Multi-Container Support**: Configure root SSH access in multiple containers with a single command
+- **Security Best Practice**: Defaults to `prohibit-password` (key-based auth only) instead of complete disable
 - **Safe Configuration**: Backs up SSH config before making changes
-- **Flexible**: Can both enable and disable root login
+- **Flexible**: Three modes - secure (prohibit-password), strict (no), or enable (yes)
 - **Status Reporting**: Shows current setting before making changes
-- **Automatic Service Reload**: Reloads SSH service after configuration change
+- **Automatic Service Reload**: Reloads SSH service to apply changes immediately
 - **Production Safe**: Validates containers and verifies changes are applied
 
 #### Usage
@@ -117,22 +118,28 @@ Enable or disable root SSH login across one or more LXC containers by modifying 
 - `-c LXC_ID [LXC_ID...]` - One or more LXC container IDs (space-separated)
 
 **Optional Arguments:**
-- `-e` - Enable root SSH login (default action is to disable)
+- `-e` - Enable root SSH login (sets `PermitRootLogin yes`)
+- `-s` - Strict mode: completely disable root login (sets `PermitRootLogin no`)
 - `-h` - Show help message
+
+**Default Behavior:**
+- Without flags: Sets `PermitRootLogin prohibit-password` (allows key-based auth only) - **RECOMMENDED**
+- With `-s` flag: Sets `PermitRootLogin no` (completely blocks root login)
+- With `-e` flag: Sets `PermitRootLogin yes` (allows root login with password)
 
 #### Examples
 
-Disable root SSH login in a single container:
-```bash
-./disableRootSSHLogin.sh -c 100
-```
-
-Disable root SSH login across multiple containers:
+Disable root password login but allow SSH keys (recommended):
 ```bash
 ./disableRootSSHLogin.sh -c 100 101 102 103
 ```
 
-Enable root SSH login (if you need to re-enable it):
+Completely disable all root SSH login (strict mode):
+```bash
+./disableRootSSHLogin.sh -c 100 101 102 -s
+```
+
+Enable root SSH login with password:
 ```bash
 ./disableRootSSHLogin.sh -c 100 101 -e
 ```
@@ -153,12 +160,18 @@ For each specified container, the script:
 3. Reads the current `PermitRootLogin` setting
 4. Backs up the SSH config with a timestamp
 5. Removes any existing `PermitRootLogin` lines (commented or uncommented)
-6. Adds the new `PermitRootLogin` setting (yes or no)
-7. Reloads the SSH service to apply changes
+6. Adds the new `PermitRootLogin` setting:
+   - Default: `prohibit-password` (blocks password auth, allows keys)
+   - With `-s`: `no` (blocks all root login)
+   - With `-e`: `yes` (allows all root login)
+7. Reloads the SSH service to apply changes immediately
 8. Continues to next container even if current one fails
 9. Displays a detailed summary showing the previous setting and result for each container
 
-**Security Note:** Disabling root SSH login is a security best practice. Instead, SSH as a regular user and use `sudo` for administrative tasks.
+**Security Notes:**
+- **`prohibit-password` (default)**: Best practice - blocks brute-force password attacks while maintaining key-based emergency access
+- **`no` (strict mode)**: Most restrictive - completely blocks root SSH, requires logging in as regular user
+- Recommended workflow: SSH as regular user with key, then use `sudo` for administrative tasks
 
 ---
 
