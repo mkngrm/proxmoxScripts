@@ -399,6 +399,56 @@ Security audit across multiple containers.
 
 ---
 
+### setupStableDiffusion.sh
+
+**⚡ NEW** - Set up a complete Stable Diffusion image generation environment in an LXC container.
+
+**Usage:** `./setupStableDiffusion.sh -c LXC_ID [OPTIONS]`
+
+**Options:**
+- `-c LXC_ID` - Container ID to create (required)
+- `-n HOSTNAME` - Hostname (default: stable-diffusion)
+- `-m MEMORY_MB` - RAM in MB (default: 8192, recommend 8GB+)
+- `-d DISK_SIZE_GB` - Disk size (default: 50GB)
+- `-r CORES` - CPU cores (default: 4)
+- `-p PORT` - WebUI port (default: 7860)
+
+**What it does:**
+- Creates a Debian LXC container with Docker
+- Installs AUTOMATIC1111's Stable Diffusion WebUI
+- Configures for CPU-only mode (no GPU required)
+- Downloads Stable Diffusion 1.5 model
+- Sets up web interface
+- Creates systemd service for auto-start
+
+**Examples:**
+```bash
+# Create with defaults (8GB RAM, 4 cores, 50GB disk)
+./setupStableDiffusion.sh -c 200
+
+# Create with more resources for better performance
+./setupStableDiffusion.sh -c 200 -m 16384 -r 8 -d 100
+```
+
+**Performance expectations (CPU-only):**
+- 512x512 image: 2-5 minutes
+- 1024x1024 image: 5-15 minutes
+- Good for batch generation, experimentation
+- Consider GPU upgrade for production use
+
+**Requirements:**
+- Minimum 8GB RAM (16GB recommended)
+- 50GB+ disk space
+- 10-30 minutes for initial setup
+- Internet connection for downloads
+
+**After installation:**
+- Access WebUI at `http://CONTAINER_IP:7860`
+- Start with 512x512 images and 20-30 steps
+- Service auto-starts on container boot
+
+---
+
 ## Installation
 
 ### Quick Install (Recommended)

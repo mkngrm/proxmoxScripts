@@ -30,6 +30,7 @@ SCRIPTS=(
     "syncTimezone.sh"
     "deployFile.sh"
     "auditContainers.sh"
+    "setupStableDiffusion.sh"
 )
 
 # Functions
