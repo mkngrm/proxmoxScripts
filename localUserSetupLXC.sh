@@ -3,12 +3,13 @@
 set -euo pipefail
 
 # Script: Proxmox LXC User Setup
-# Description: Create a user in an LXC container with sudo access and SSH key authentication
+# Description: Create a user in one or more LXC containers with sudo access and SSH key authentication
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Default values
@@ -16,32 +17,40 @@ SSH_PUBKEY=""
 PASSWORD=""
 GENERATE_PASSWORD=false
 SUDO_NOPASSWD=false
+LXC_IDS=()
+
+# Arrays to track results
+declare -A CONTAINER_RESULTS
+declare -A CONTAINER_IPS
 
 # Functions
 usage() {
     cat << EOF
-Usage: $0 -c LXC_ID -u USERNAME [OPTIONS]
+Usage: $0 -c LXC_ID [LXC_ID...] -u USERNAME [OPTIONS]
 
 Required arguments:
-  -c LXC_ID          LXC container ID
-  -u USERNAME        Username to create
+  -c LXC_ID [LXC_ID...]  One or more LXC container IDs (space-separated)
+  -u USERNAME            Username to create
 
 Optional arguments:
-  -k SSH_KEY         Path to SSH public key file (default: /root/.ssh/id_rsa.pub)
-  -p PASSWORD        Password for the user (not recommended - use -g instead)
-  -g                 Generate a random secure password
-  -n                 Add user to sudoers with NOPASSWD (allows sudo without password)
-  -h                 Show this help message
+  -k SSH_KEY             Path to SSH public key file (default: /root/.ssh/id_rsa.pub)
+  -p PASSWORD            Password for the user (not recommended - use -g instead)
+  -g                     Generate a random secure password
+  -n                     Add user to sudoers with NOPASSWD (allows sudo without password)
+  -h                     Show this help message
 
 Examples:
-  # Create user with SSH key from default location
+  # Create user in a single container
   $0 -c 100 -u john -g
 
-  # Create user with custom SSH key and specific password
-  $0 -c 100 -u john -k /path/to/key.pub -p MyPassword
+  # Create user in multiple containers
+  $0 -c 100 101 102 -u john -g
 
-  # Create user with passwordless sudo
-  $0 -c 100 -u john -g -n
+  # Create user with custom SSH key and passwordless sudo in multiple containers
+  $0 -c 100 101 -u jane -k ~/.ssh/my_key.pub -g -n
+
+  # Create user with specific password across multiple containers
+  $0 -c 100 101 102 -u developer -k ~/.ssh/dev_key.pub -p MySecurePass123
 
 EOF
     exit 1
@@ -59,6 +68,10 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+log_container() {
+    echo -e "${BLUE}[LXC $1]${NC} $2"
+}
+
 generate_password() {
     # Generate a 16-character random password
     openssl rand -base64 12 | tr -d "=+/" | cut -c1-16
@@ -66,18 +79,18 @@ generate_password() {
 
 validate_lxc_exists() {
     if ! pct status "$1" &>/dev/null; then
-        log_error "LXC container $1 does not exist or is not accessible"
-        exit 1
+        return 1
     fi
+    return 0
 }
 
 validate_lxc_running() {
     local status
-    status=$(pct status "$1" | awk '{print $2}')
+    status=$(pct status "$1" 2>/dev/null | awk '{print $2}')
     if [ "$status" != "running" ]; then
-        log_error "LXC container $1 is not running (status: $status)"
-        exit 1
+        return 1
     fi
+    return 0
 }
 
 check_user_exists() {
@@ -88,22 +101,157 @@ check_user_exists() {
     fi
 }
 
+setup_user_in_container() {
+    local lxc_id=$1
+    local username=$2
+    local password=$3
+    local ssh_key=$4
+    local sudo_nopasswd=$5
+
+    log_container "$lxc_id" "Starting user setup..."
+
+    # Validate LXC container exists
+    if ! validate_lxc_exists "$lxc_id"; then
+        log_container "$lxc_id" "${RED}Container does not exist or is not accessible${NC}"
+        CONTAINER_RESULTS[$lxc_id]="FAILED: Container not found"
+        return 1
+    fi
+
+    # Validate LXC container is running
+    if ! validate_lxc_running "$lxc_id"; then
+        local status
+        status=$(pct status "$lxc_id" 2>/dev/null | awk '{print $2}')
+        log_container "$lxc_id" "${RED}Container is not running (status: $status)${NC}"
+        CONTAINER_RESULTS[$lxc_id]="FAILED: Not running"
+        return 1
+    fi
+
+    # Check if user already exists
+    if check_user_exists "$lxc_id" "$username"; then
+        log_container "$lxc_id" "${YELLOW}User '$username' already exists, skipping${NC}"
+        CONTAINER_RESULTS[$lxc_id]="SKIPPED: User exists"
+        return 0
+    fi
+
+    # Create the user
+    log_container "$lxc_id" "Creating user '$username'..."
+    if ! pct exec "$lxc_id" -- adduser --disabled-password --gecos "" "$username" &>/dev/null; then
+        log_container "$lxc_id" "${RED}Failed to create user${NC}"
+        CONTAINER_RESULTS[$lxc_id]="FAILED: User creation failed"
+        return 1
+    fi
+
+    # Set password if provided
+    if [ -n "$password" ]; then
+        log_container "$lxc_id" "Setting password..."
+        if ! pct exec "$lxc_id" -- bash -c "echo '$username:$password' | chpasswd" &>/dev/null; then
+            log_container "$lxc_id" "${RED}Failed to set password${NC}"
+            CONTAINER_RESULTS[$lxc_id]="FAILED: Password setup failed"
+            return 1
+        fi
+    fi
+
+    # Add user to sudo group
+    log_container "$lxc_id" "Adding user to sudo group..."
+    if ! pct exec "$lxc_id" -- usermod -aG sudo "$username" &>/dev/null; then
+        log_container "$lxc_id" "${RED}Failed to add user to sudo group${NC}"
+        CONTAINER_RESULTS[$lxc_id]="FAILED: Sudo setup failed"
+        return 1
+    fi
+
+    # Configure NOPASSWD sudo if requested
+    if [ "$sudo_nopasswd" = true ]; then
+        log_container "$lxc_id" "Configuring passwordless sudo..."
+        pct exec "$lxc_id" -- bash -c "echo '$username ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$username" &>/dev/null
+        pct exec "$lxc_id" -- chmod 0440 "/etc/sudoers.d/$username" &>/dev/null
+    fi
+
+    # Configure SSH access
+    if [ -n "$ssh_key" ]; then
+        log_container "$lxc_id" "Configuring SSH key authentication..."
+
+        # Create .ssh directory
+        pct exec "$lxc_id" -- mkdir -p "/home/$username/.ssh" &>/dev/null
+        pct exec "$lxc_id" -- chmod 700 "/home/$username/.ssh" &>/dev/null
+
+        # Add public key
+        local pubkey_content
+        pubkey_content=$(cat "$ssh_key")
+        pct exec "$lxc_id" -- bash -c "echo '$pubkey_content' >> /home/$username/.ssh/authorized_keys" &>/dev/null
+        pct exec "$lxc_id" -- chmod 600 "/home/$username/.ssh/authorized_keys" &>/dev/null
+        pct exec "$lxc_id" -- chown -R "$username:$username" "/home/$username/.ssh" &>/dev/null
+    fi
+
+    # Ensure SSH service is enabled and running
+    log_container "$lxc_id" "Ensuring SSH service is enabled..."
+    if pct exec "$lxc_id" -- systemctl is-enabled ssh &>/dev/null || \
+       pct exec "$lxc_id" -- systemctl is-enabled sshd &>/dev/null; then
+        # SSH service exists, enable and start it
+        if pct exec "$lxc_id" -- systemctl enable ssh 2>/dev/null || \
+           pct exec "$lxc_id" -- systemctl enable sshd 2>/dev/null; then
+            pct exec "$lxc_id" -- systemctl start ssh 2>/dev/null || \
+            pct exec "$lxc_id" -- systemctl start sshd 2>/dev/null
+        fi
+    else
+        log_container "$lxc_id" "${YELLOW}SSH service not found. Install openssh-server if needed${NC}"
+    fi
+
+    # Get container IP
+    local lxc_ip
+    if lxc_ip=$(pct exec "$lxc_id" -- hostname -I 2>/dev/null | awk '{print $1}'); then
+        if [ -n "$lxc_ip" ]; then
+            CONTAINER_IPS[$lxc_id]=$lxc_ip
+        fi
+    fi
+
+    log_container "$lxc_id" "${GREEN}User setup completed successfully${NC}"
+    CONTAINER_RESULTS[$lxc_id]="SUCCESS"
+    return 0
+}
+
 # Parse command line arguments
-while getopts "c:u:k:p:gnh" opt; do
-    case $opt in
-        c) LXC_ID="$OPTARG" ;;
-        u) USERNAME="$OPTARG" ;;
-        k) SSH_PUBKEY="$OPTARG" ;;
-        p) PASSWORD="$OPTARG" ;;
-        g) GENERATE_PASSWORD=true ;;
-        n) SUDO_NOPASSWD=true ;;
-        h) usage ;;
-        *) usage ;;
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -c)
+            shift
+            # Collect all container IDs until next flag or end of args
+            while [[ $# -gt 0 ]] && [[ ! $1 =~ ^- ]]; do
+                LXC_IDS+=("$1")
+                shift
+            done
+            ;;
+        -u)
+            USERNAME="$2"
+            shift 2
+            ;;
+        -k)
+            SSH_PUBKEY="$2"
+            shift 2
+            ;;
+        -p)
+            PASSWORD="$2"
+            shift 2
+            ;;
+        -g)
+            GENERATE_PASSWORD=true
+            shift
+            ;;
+        -n)
+            SUDO_NOPASSWD=true
+            shift
+            ;;
+        -h)
+            usage
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            usage
+            ;;
     esac
 done
 
 # Validate required parameters
-if [ -z "${LXC_ID:-}" ] || [ -z "${USERNAME:-}" ]; then
+if [ ${#LXC_IDS[@]} -eq 0 ] || [ -z "${USERNAME:-}" ]; then
     log_error "Missing required arguments"
     usage
 fi
@@ -114,18 +262,7 @@ if ! [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
     exit 1
 fi
 
-# Validate LXC container
-log_info "Validating LXC container $LXC_ID..."
-validate_lxc_exists "$LXC_ID"
-validate_lxc_running "$LXC_ID"
-
-# Check if user already exists
-if check_user_exists "$LXC_ID" "$USERNAME"; then
-    log_error "User '$USERNAME' already exists in LXC $LXC_ID"
-    exit 1
-fi
-
-# Handle password
+# Handle password generation (once for all containers)
 if [ "$GENERATE_PASSWORD" = true ]; then
     PASSWORD=$(generate_password)
     log_info "Generated random password for user '$USERNAME'"
@@ -143,74 +280,51 @@ if [ -n "$SSH_PUBKEY" ] && [ ! -f "$SSH_PUBKEY" ]; then
     exit 1
 fi
 
-# Start user creation
-log_info "Creating user '$USERNAME' in LXC $LXC_ID..."
-
-# Create the user
-if ! pct exec "$LXC_ID" -- adduser --disabled-password --gecos "" "$USERNAME"; then
-    log_error "Failed to create user '$USERNAME'"
-    exit 1
-fi
-
-# Set password if provided
-if [ -n "$PASSWORD" ]; then
-    log_info "Setting password for user '$USERNAME'..."
-    if ! pct exec "$LXC_ID" -- bash -c "echo '$USERNAME:$PASSWORD' | chpasswd"; then
-        log_error "Failed to set password"
-        exit 1
-    fi
-fi
-
-# Add user to sudo group
-log_info "Adding user '$USERNAME' to sudo group..."
-if ! pct exec "$LXC_ID" -- usermod -aG sudo "$USERNAME"; then
-    log_error "Failed to add user to sudo group"
-    exit 1
-fi
-
-# Configure NOPASSWD sudo if requested
-if [ "$SUDO_NOPASSWD" = true ]; then
-    log_info "Configuring passwordless sudo for user '$USERNAME'..."
-    pct exec "$LXC_ID" -- bash -c "echo '$USERNAME ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$USERNAME"
-    pct exec "$LXC_ID" -- chmod 0440 "/etc/sudoers.d/$USERNAME"
-fi
-
-# Configure SSH access
-if [ -n "$SSH_PUBKEY" ]; then
-    log_info "Configuring SSH key authentication..."
-
-    # Create .ssh directory
-    pct exec "$LXC_ID" -- mkdir -p "/home/$USERNAME/.ssh"
-    pct exec "$LXC_ID" -- chmod 700 "/home/$USERNAME/.ssh"
-
-    # Add public key
-    PUBKEY_CONTENT=$(cat "$SSH_PUBKEY")
-    pct exec "$LXC_ID" -- bash -c "echo '$PUBKEY_CONTENT' >> /home/$USERNAME/.ssh/authorized_keys"
-    pct exec "$LXC_ID" -- chmod 600 "/home/$USERNAME/.ssh/authorized_keys"
-    pct exec "$LXC_ID" -- chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/.ssh"
-
-    log_info "SSH key added successfully"
-fi
-
-# Ensure SSH service is enabled and running
-log_info "Ensuring SSH service is enabled and started..."
-if pct exec "$LXC_ID" -- systemctl is-enabled ssh &>/dev/null || \
-   pct exec "$LXC_ID" -- systemctl is-enabled sshd &>/dev/null; then
-    # SSH service exists, enable and start it
-    if pct exec "$LXC_ID" -- systemctl enable ssh 2>/dev/null || \
-       pct exec "$LXC_ID" -- systemctl enable sshd 2>/dev/null; then
-        pct exec "$LXC_ID" -- systemctl start ssh 2>/dev/null || \
-        pct exec "$LXC_ID" -- systemctl start sshd 2>/dev/null
-    fi
-else
-    log_warn "SSH service not found in container. You may need to install openssh-server"
-fi
-
-# Summary
+# Display summary of what will be done
 echo
-log_info "User setup completed successfully!"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  LXC Container: $LXC_ID"
+log_info "Setting up user '$USERNAME' in ${#LXC_IDS[@]} container(s): ${LXC_IDS[*]}"
+echo
+
+# Process each container
+for lxc_id in "${LXC_IDS[@]}"; do
+    setup_user_in_container "$lxc_id" "$USERNAME" "$PASSWORD" "$SSH_PUBKEY" "$SUDO_NOPASSWD"
+    echo
+done
+
+# Display final summary
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_info "Summary of operations"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo
+
+# Count successes and failures
+success_count=0
+failed_count=0
+skipped_count=0
+
+for lxc_id in "${LXC_IDS[@]}"; do
+    result="${CONTAINER_RESULTS[$lxc_id]}"
+    case $result in
+        SUCCESS)
+            echo -e "  ${GREEN}✓${NC} LXC $lxc_id: Success"
+            if [ -n "${CONTAINER_IPS[$lxc_id]:-}" ]; then
+                echo "    ssh $USERNAME@${CONTAINER_IPS[$lxc_id]}"
+            fi
+            ((success_count++))
+            ;;
+        SKIPPED*)
+            echo -e "  ${YELLOW}⊘${NC} LXC $lxc_id: $result"
+            ((skipped_count++))
+            ;;
+        FAILED*)
+            echo -e "  ${RED}✗${NC} LXC $lxc_id: $result"
+            ((failed_count++))
+            ;;
+    esac
+done
+
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Username: $USERNAME"
 if [ -n "$PASSWORD" ]; then
     if [ "$GENERATE_PASSWORD" = true ]; then
@@ -227,13 +341,11 @@ fi
 if [ -n "$SSH_PUBKEY" ]; then
     echo "  SSH key: Configured"
 fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo
+echo "  Results: $success_count succeeded, $failed_count failed, $skipped_count skipped"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Get container IP if possible
-if LXC_IP=$(pct exec "$LXC_ID" -- hostname -I 2>/dev/null | awk '{print $1}'); then
-    if [ -n "$LXC_IP" ]; then
-        log_info "You can now SSH to the container:"
-        echo "  ssh $USERNAME@$LXC_IP"
-    fi
+# Exit with error if any containers failed
+if [ $failed_count -gt 0 ]; then
+    exit 1
 fi
