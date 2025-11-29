@@ -71,7 +71,10 @@ Create user with specific password in multiple containers:
 - Proxmox VE host
 - Root access or appropriate permissions to execute `pct` commands
 - Target LXC container must be running
+- Container must have `apt` package manager (Debian/Ubuntu based)
 - OpenSSH server installed in the target container (for SSH access)
+
+**Note:** The script will automatically install `sudo` if it's not present in the container.
 
 #### What It Does
 
@@ -81,12 +84,13 @@ For each specified container, the script:
 2. Checks that the username doesn't already exist (skips if exists)
 3. Creates the user in the container
 4. Sets the password (if provided or generated - same password for all containers)
-5. Adds the user to the sudo group
-6. Optionally configures passwordless sudo
-7. Configures SSH key authentication (if key provided)
-8. Ensures SSH service is enabled and running
-9. Continues to next container even if current one fails
-10. Displays a detailed summary showing success/failure for each container with SSH connection commands
+5. Checks if `sudo` is installed, and installs it automatically if missing
+6. Adds the user to the sudo group
+7. Optionally configures passwordless sudo
+8. Configures SSH key authentication (if key provided)
+9. Ensures SSH service is enabled and running
+10. Continues to next container even if current one fails
+11. Displays a detailed summary showing success/failure for each container with SSH connection commands
 
 ## Installation
 

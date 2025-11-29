@@ -151,6 +151,18 @@ setup_user_in_container() {
         fi
     fi
 
+    # Check if sudo is installed, install if needed
+    if ! pct exec "$lxc_id" -- command -v sudo &>/dev/null; then
+        log_container "$lxc_id" "sudo not found, installing..."
+        if pct exec "$lxc_id" -- bash -c "apt-get update -qq && apt-get install -y sudo" &>/dev/null; then
+            log_container "$lxc_id" "sudo installed successfully"
+        else
+            log_container "$lxc_id" "${RED}Failed to install sudo${NC}"
+            CONTAINER_RESULTS[$lxc_id]="FAILED: Could not install sudo"
+            return 1
+        fi
+    fi
+
     # Add user to sudo group
     log_container "$lxc_id" "Adding user to sudo group..."
     if ! pct exec "$lxc_id" -- usermod -aG sudo "$username" &>/dev/null; then
