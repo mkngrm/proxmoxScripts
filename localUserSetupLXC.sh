@@ -197,38 +197,50 @@ setup_user_in_container() {
     # Ensure SSH service is enabled and running
     log_container "$lxc_id" "Checking SSH service..."
 
-    # Determine which SSH service name is used (ssh or sshd)
+    # Try to detect which SSH service name is used by checking what's actually active
     local ssh_service=""
-    if pct exec "$lxc_id" -- systemctl list-unit-files ssh.service &>/dev/null; then
+    if pct exec "$lxc_id" -- systemctl is-active ssh &>/dev/null; then
         ssh_service="ssh"
-    elif pct exec "$lxc_id" -- systemctl list-unit-files sshd.service &>/dev/null; then
+    elif pct exec "$lxc_id" -- systemctl is-active sshd &>/dev/null; then
         ssh_service="sshd"
+    elif pct exec "$lxc_id" -- systemctl status ssh &>/dev/null; then
+        ssh_service="ssh"
+    elif pct exec "$lxc_id" -- systemctl status sshd &>/dev/null; then
+        ssh_service="sshd"
+    elif pct exec "$lxc_id" -- pgrep -x sshd &>/dev/null; then
+        # SSH daemon is running but not managed by systemd, or has a different name
+        log_container "$lxc_id" "SSH daemon is running (not managed by systemctl)"
+        ssh_service="detected-running"
     fi
 
-    if [ -n "$ssh_service" ]; then
-        # Check if already enabled
-        if pct exec "$lxc_id" -- systemctl is-enabled "$ssh_service" &>/dev/null; then
-            log_container "$lxc_id" "SSH service already enabled"
+    if [ "$ssh_service" = "detected-running" ]; then
+        # SSH is running but we can't manage it via systemctl
+        # This is fine, just note it
+        :
+    elif [ -n "$ssh_service" ]; then
+        # Check if service is active (running)
+        if pct exec "$lxc_id" -- systemctl is-active "$ssh_service" &>/dev/null; then
+            log_container "$lxc_id" "SSH service is running"
         else
-            # Enable the service
+            # Try to start it
+            if pct exec "$lxc_id" -- systemctl start "$ssh_service" &>/dev/null; then
+                log_container "$lxc_id" "SSH service started"
+            else
+                log_container "$lxc_id" "${YELLOW}Could not start SSH service${NC}"
+            fi
+        fi
+
+        # Check if service is enabled for boot
+        if pct exec "$lxc_id" -- systemctl is-enabled "$ssh_service" &>/dev/null; then
+            log_container "$lxc_id" "SSH service enabled for auto-start"
+        else
+            # Try to enable it
             if pct exec "$lxc_id" -- systemctl enable "$ssh_service" &>/dev/null; then
                 log_container "$lxc_id" "SSH service enabled for auto-start on boot"
             fi
         fi
-
-        # Check if already running
-        if pct exec "$lxc_id" -- systemctl is-active "$ssh_service" &>/dev/null; then
-            log_container "$lxc_id" "SSH service is running"
-        else
-            # Start the service
-            if pct exec "$lxc_id" -- systemctl start "$ssh_service" &>/dev/null; then
-                log_container "$lxc_id" "SSH service started"
-            else
-                log_container "$lxc_id" "${YELLOW}Failed to start SSH service${NC}"
-            fi
-        fi
     else
-        log_container "$lxc_id" "${YELLOW}SSH service not found. Install openssh-server if needed${NC}"
+        log_container "$lxc_id" "${YELLOW}SSH service not detected. Install openssh-server if needed${NC}"
     fi
 
     # Get container IP
