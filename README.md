@@ -175,6 +175,222 @@ For each specified container, the script:
 
 ---
 
+### updateContainers.sh
+
+Batch update and upgrade packages across multiple LXC containers.
+
+**Usage:** `./updateContainers.sh -c LXC_ID [LXC_ID...] [OPTIONS]`
+
+**Options:**
+- `-y` - Auto-yes (non-interactive)
+- `-r` - Reboot containers if required after updates
+- `-u` - Update only (skip upgrade, only refresh package lists)
+
+**Examples:**
+```bash
+# Update and upgrade all containers
+./updateContainers.sh -c 100 101 102 -y
+
+# Update package lists only
+./updateContainers.sh -c 100 101 102 -u
+
+# Update, upgrade, and auto-reboot if needed
+./updateContainers.sh -c 100 101 102 -y -r
+```
+
+---
+
+### healthCheck.sh
+
+Check health status of multiple containers including disk space, memory, SSH, and system load.
+
+**Usage:** `./healthCheck.sh -c LXC_ID [LXC_ID...] [OPTIONS]`
+
+**Options:**
+- `-d PERCENT` - Disk usage warning threshold (default: 80%)
+- `-m PERCENT` - Memory usage warning threshold (default: 90%)
+
+**Checks performed:**
+- Container running status
+- Disk space usage
+- Memory usage
+- SSH service status
+- System load average
+- Uptime
+
+**Example:**
+```bash
+./healthCheck.sh -c 100 101 102 -d 90 -m 85
+```
+
+---
+
+### enableUnattendedUpgrades.sh
+
+Configure automatic security updates using unattended-upgrades package.
+
+**Usage:** `./enableUnattendedUpgrades.sh -c LXC_ID [LXC_ID...] [OPTIONS]`
+
+**Options:**
+- `-e EMAIL` - Email address for update notifications
+- `-r` - Enable automatic reboot when required (at 03:00)
+
+**What it does:**
+- Installs unattended-upgrades package
+- Configures automatic security updates
+- Optionally sets email notifications
+- Optionally enables auto-reboot when needed
+
+**Examples:**
+```bash
+# Enable with email notifications
+./enableUnattendedUpgrades.sh -c 100 101 102 -e admin@example.com
+
+# Enable with auto-reboot
+./enableUnattendedUpgrades.sh -c 100 101 102 -r
+```
+
+---
+
+### bulkContainerControl.sh
+
+Start, stop, shutdown, or restart multiple LXC containers.
+
+**Usage:** `./bulkContainerControl.sh -c LXC_ID [LXC_ID...] -a ACTION`
+
+**Actions:**
+- `start` - Start stopped containers
+- `stop` - Force stop running containers
+- `shutdown` - Gracefully shutdown running containers
+- `restart` - Restart running containers
+
+**Examples:**
+```bash
+# Start containers
+./bulkContainerControl.sh -c 100 101 102 -a start
+
+# Gracefully shutdown
+./bulkContainerControl.sh -c 100 101 102 -a shutdown
+
+# Restart containers
+./bulkContainerControl.sh -c 100 101 102 -a restart
+```
+
+---
+
+### snapshotContainers.sh
+
+Create or delete snapshots across multiple LXC containers.
+
+**Usage:** `./snapshotContainers.sh -c LXC_ID [LXC_ID...] -a ACTION -s SNAPSHOT_NAME [OPTIONS]`
+
+**Options:**
+- `-a ACTION` - Action: `create` or `delete`
+- `-s NAME` - Snapshot name
+- `-d DESCRIPTION` - Description for snapshot (create only)
+
+**Examples:**
+```bash
+# Create snapshots before updates
+./snapshotContainers.sh -c 100 101 102 -a create -s pre-update -d "Before system update"
+
+# Create snapshots with timestamp
+./snapshotContainers.sh -c 100 101 102 -a create -s backup-$(date +%Y%m%d)
+
+# Delete old snapshots
+./snapshotContainers.sh -c 100 101 102 -a delete -s pre-update
+```
+
+---
+
+### deploySSHKeys.sh
+
+Add or remove SSH keys from users across multiple containers.
+
+**Usage:** `./deploySSHKeys.sh -c LXC_ID [LXC_ID...] -u USERNAME -k KEY_FILE [OPTIONS]`
+
+**Options:**
+- `-u USERNAME` - Username to manage SSH keys for
+- `-k KEY_FILE` - Path to SSH public key file
+- `-r` - Remove key instead of adding
+
+**Examples:**
+```bash
+# Add SSH key to user
+./deploySSHKeys.sh -c 100 101 102 -u junior -k ~/.ssh/id_rsa.pub
+
+# Remove old SSH key
+./deploySSHKeys.sh -c 100 101 102 -u junior -k ~/.ssh/old_key.pub -r
+```
+
+---
+
+### syncTimezone.sh
+
+Set timezone across multiple containers.
+
+**Usage:** `./syncTimezone.sh -c LXC_ID [LXC_ID...] -t TIMEZONE`
+
+**Common timezones:**
+- `UTC`
+- `America/New_York`, `America/Chicago`, `America/Denver`, `America/Los_Angeles`
+- `Europe/London`, `Europe/Paris`
+- `Asia/Tokyo`
+
+**Example:**
+```bash
+./syncTimezone.sh -c 100 101 102 -t America/New_York
+```
+
+---
+
+### deployFile.sh
+
+Copy files to multiple containers with automatic backup.
+
+**Usage:** `./deployFile.sh -c LXC_ID [LXC_ID...] -f SOURCE_FILE -d DEST_PATH [OPTIONS]`
+
+**Options:**
+- `-f SOURCE_FILE` - Source file on Proxmox host
+- `-d DEST_PATH` - Destination path in containers
+- `-o OWNER` - Set owner (user:group format)
+- `-p PERMISSIONS` - Set permissions (octal, e.g., 644, 755)
+- `-n` - No backup (skip backing up existing file)
+
+**Examples:**
+```bash
+# Deploy custom motd
+./deployFile.sh -c 100 101 102 -f /root/custom_motd -d /etc/motd
+
+# Deploy script with specific permissions
+./deployFile.sh -c 100 101 102 -f /root/script.sh -d /usr/local/bin/script.sh -p 755 -o root:root
+```
+
+---
+
+### auditContainers.sh
+
+Security audit across multiple containers.
+
+**Usage:** `./auditContainers.sh -c LXC_ID [LXC_ID...]`
+
+**Security checks performed:**
+- Users with sudo/root access
+- SSH root login configuration
+- Users with empty passwords
+- World-writable files in sensitive directories
+- SUID/SGID binaries count
+- Listening network services
+- Firewall status (UFW)
+- Unattended upgrades configuration
+
+**Example:**
+```bash
+./auditContainers.sh -c 100 101 102
+```
+
+---
+
 ## Installation
 
 Clone this repository on your Proxmox host:
