@@ -92,6 +92,76 @@ For each specified container, the script:
 10. Continues to next container even if current one fails
 11. Displays a detailed summary showing success/failure for each container with SSH connection commands
 
+---
+
+### disableRootSSHLogin.sh
+
+Enable or disable root SSH login across one or more LXC containers by modifying the SSH daemon configuration.
+
+#### Features
+
+- **Multi-Container Support**: Configure root SSH access in multiple containers with a single command
+- **Safe Configuration**: Backs up SSH config before making changes
+- **Flexible**: Can both enable and disable root login
+- **Status Reporting**: Shows current setting before making changes
+- **Automatic Service Reload**: Reloads SSH service after configuration change
+- **Production Safe**: Validates containers and verifies changes are applied
+
+#### Usage
+
+```bash
+./disableRootSSHLogin.sh -c LXC_ID [LXC_ID...] [OPTIONS]
+```
+
+**Required Arguments:**
+- `-c LXC_ID [LXC_ID...]` - One or more LXC container IDs (space-separated)
+
+**Optional Arguments:**
+- `-e` - Enable root SSH login (default action is to disable)
+- `-h` - Show help message
+
+#### Examples
+
+Disable root SSH login in a single container:
+```bash
+./disableRootSSHLogin.sh -c 100
+```
+
+Disable root SSH login across multiple containers:
+```bash
+./disableRootSSHLogin.sh -c 100 101 102 103
+```
+
+Enable root SSH login (if you need to re-enable it):
+```bash
+./disableRootSSHLogin.sh -c 100 101 -e
+```
+
+#### Requirements
+
+- Proxmox VE host
+- Root access or appropriate permissions to execute `pct` commands
+- Target LXC containers must be running
+- OpenSSH server installed in the target containers
+
+#### What It Does
+
+For each specified container, the script:
+
+1. Validates the LXC container exists and is running
+2. Checks if `/etc/ssh/sshd_config` exists
+3. Reads the current `PermitRootLogin` setting
+4. Backs up the SSH config with a timestamp
+5. Removes any existing `PermitRootLogin` lines (commented or uncommented)
+6. Adds the new `PermitRootLogin` setting (yes or no)
+7. Reloads the SSH service to apply changes
+8. Continues to next container even if current one fails
+9. Displays a detailed summary showing the previous setting and result for each container
+
+**Security Note:** Disabling root SSH login is a security best practice. Instead, SSH as a regular user and use `sudo` for administrative tasks.
+
+---
+
 ## Installation
 
 Clone this repository on your Proxmox host:
