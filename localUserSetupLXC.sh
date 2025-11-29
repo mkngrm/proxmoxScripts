@@ -197,7 +197,22 @@ setup_user_in_container() {
     # Ensure SSH service is enabled and running
     log_container "$lxc_id" "Checking SSH service..."
 
-    # Try to detect which SSH service name is used by checking what's actually active
+    # Method 1: Check if SSH port is listening (most reliable)
+    local ssh_detected=false
+    if pct exec "$lxc_id" -- ss -tlnp 2>/dev/null | grep -q ':22 ' || \
+       pct exec "$lxc_id" -- netstat -tlnp 2>/dev/null | grep -q ':22 ' || \
+       pct exec "$lxc_id" -- lsof -i:22 &>/dev/null; then
+        ssh_detected=true
+        log_container "$lxc_id" "SSH is listening on port 22"
+    fi
+
+    # Method 2: Check for sshd process
+    if [ "$ssh_detected" = false ] && pct exec "$lxc_id" -- pgrep -f 'sshd|ssh' &>/dev/null; then
+        ssh_detected=true
+        log_container "$lxc_id" "SSH daemon process is running"
+    fi
+
+    # Try to detect and manage the service via systemctl (best effort)
     local ssh_service=""
     if pct exec "$lxc_id" -- systemctl is-active ssh &>/dev/null; then
         ssh_service="ssh"
@@ -207,40 +222,27 @@ setup_user_in_container() {
         ssh_service="ssh"
     elif pct exec "$lxc_id" -- systemctl status sshd &>/dev/null; then
         ssh_service="sshd"
-    elif pct exec "$lxc_id" -- pgrep -x sshd &>/dev/null; then
-        # SSH daemon is running but not managed by systemd, or has a different name
-        log_container "$lxc_id" "SSH daemon is running (not managed by systemctl)"
-        ssh_service="detected-running"
     fi
 
-    if [ "$ssh_service" = "detected-running" ]; then
-        # SSH is running but we can't manage it via systemctl
-        # This is fine, just note it
-        :
-    elif [ -n "$ssh_service" ]; then
-        # Check if service is active (running)
-        if pct exec "$lxc_id" -- systemctl is-active "$ssh_service" &>/dev/null; then
-            log_container "$lxc_id" "SSH service is running"
-        else
-            # Try to start it
-            if pct exec "$lxc_id" -- systemctl start "$ssh_service" &>/dev/null; then
-                log_container "$lxc_id" "SSH service started"
-            else
-                log_container "$lxc_id" "${YELLOW}Could not start SSH service${NC}"
-            fi
-        fi
-
-        # Check if service is enabled for boot
-        if pct exec "$lxc_id" -- systemctl is-enabled "$ssh_service" &>/dev/null; then
-            log_container "$lxc_id" "SSH service enabled for auto-start"
-        else
-            # Try to enable it
+    if [ -n "$ssh_service" ]; then
+        # Try to enable service for boot if not already
+        if ! pct exec "$lxc_id" -- systemctl is-enabled "$ssh_service" &>/dev/null; then
             if pct exec "$lxc_id" -- systemctl enable "$ssh_service" &>/dev/null; then
                 log_container "$lxc_id" "SSH service enabled for auto-start on boot"
             fi
         fi
-    else
-        log_container "$lxc_id" "${YELLOW}SSH service not detected. Install openssh-server if needed${NC}"
+
+        # Try to start if not running
+        if ! pct exec "$lxc_id" -- systemctl is-active "$ssh_service" &>/dev/null; then
+            if pct exec "$lxc_id" -- systemctl start "$ssh_service" &>/dev/null; then
+                log_container "$lxc_id" "SSH service started"
+            fi
+        fi
+    fi
+
+    # Final message
+    if [ "$ssh_detected" = false ]; then
+        log_container "$lxc_id" "${YELLOW}SSH may not be running. Install openssh-server if needed${NC}"
     fi
 
     # Get container IP
@@ -350,7 +352,7 @@ failed_count=0
 skipped_count=0
 
 for lxc_id in "${LXC_IDS[@]}"; do
-    result="${CONTAINER_RESULTS[$lxc_id]}"
+    result="${CONTAINER_RESULTS[$lxc_id]:-UNKNOWN}"
     case $result in
         SUCCESS)
             echo -e "  ${GREEN}✓${NC} LXC $lxc_id: Success"
@@ -365,6 +367,10 @@ for lxc_id in "${LXC_IDS[@]}"; do
             ;;
         FAILED*)
             echo -e "  ${RED}✗${NC} LXC $lxc_id: $result"
+            ((failed_count++))
+            ;;
+        *)
+            echo -e "  ${YELLOW}?${NC} LXC $lxc_id: $result"
             ((failed_count++))
             ;;
     esac
