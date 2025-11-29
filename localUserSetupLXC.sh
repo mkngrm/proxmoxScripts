@@ -195,14 +195,37 @@ setup_user_in_container() {
     fi
 
     # Ensure SSH service is enabled and running
-    log_container "$lxc_id" "Ensuring SSH service is enabled..."
-    if pct exec "$lxc_id" -- systemctl is-enabled ssh &>/dev/null || \
-       pct exec "$lxc_id" -- systemctl is-enabled sshd &>/dev/null; then
-        # SSH service exists, enable and start it
-        if pct exec "$lxc_id" -- systemctl enable ssh 2>/dev/null || \
-           pct exec "$lxc_id" -- systemctl enable sshd 2>/dev/null; then
-            pct exec "$lxc_id" -- systemctl start ssh 2>/dev/null || \
-            pct exec "$lxc_id" -- systemctl start sshd 2>/dev/null
+    log_container "$lxc_id" "Checking SSH service..."
+
+    # Determine which SSH service name is used (ssh or sshd)
+    local ssh_service=""
+    if pct exec "$lxc_id" -- systemctl list-unit-files ssh.service &>/dev/null; then
+        ssh_service="ssh"
+    elif pct exec "$lxc_id" -- systemctl list-unit-files sshd.service &>/dev/null; then
+        ssh_service="sshd"
+    fi
+
+    if [ -n "$ssh_service" ]; then
+        # Check if already enabled
+        if pct exec "$lxc_id" -- systemctl is-enabled "$ssh_service" &>/dev/null; then
+            log_container "$lxc_id" "SSH service already enabled"
+        else
+            # Enable the service
+            if pct exec "$lxc_id" -- systemctl enable "$ssh_service" &>/dev/null; then
+                log_container "$lxc_id" "SSH service enabled for auto-start on boot"
+            fi
+        fi
+
+        # Check if already running
+        if pct exec "$lxc_id" -- systemctl is-active "$ssh_service" &>/dev/null; then
+            log_container "$lxc_id" "SSH service is running"
+        else
+            # Start the service
+            if pct exec "$lxc_id" -- systemctl start "$ssh_service" &>/dev/null; then
+                log_container "$lxc_id" "SSH service started"
+            else
+                log_container "$lxc_id" "${YELLOW}Failed to start SSH service${NC}"
+            fi
         fi
     else
         log_container "$lxc_id" "${YELLOW}SSH service not found. Install openssh-server if needed${NC}"

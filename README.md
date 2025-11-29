@@ -88,7 +88,7 @@ For each specified container, the script:
 6. Adds the user to the sudo group
 7. Optionally configures passwordless sudo
 8. Configures SSH key authentication (if key provided)
-9. Ensures SSH service is enabled and running
+9. Ensures SSH service is enabled (auto-start on boot) and running
 10. Continues to next container even if current one fails
 11. Displays a detailed summary showing success/failure for each container with SSH connection commands
 
